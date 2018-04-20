@@ -1,0 +1,109 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Recognize the characters in the image uploaded to S3 bucket using OCR.
+Outputs:
+  ImageBucket:
+    Description: S3 Bucket where the images needs to be uploaded.
+    Value:
+      Ref: ImageBucketName
+  OutputTextTable:
+    Description: DynamoDB table where the text will be stored.
+    Value:
+      Ref: TextTableName
+Parameters:
+  ImageBucketName:
+    AllowedPattern: ^[a-z0-9][a-z0-9-]*[a-z0-9]$
+    Description: 'Name of the Bucket to store the images. Note: It should be lowecase
+      letters, numbers or hypen and between 3 and 63 characters.'
+    MaxLength: 63
+    MinLength: 3
+    Type: String
+  TextTableName:
+    AllowedPattern: ^[a-zA-Z0-9][a-zA-Z0-9-_]*[a-zA-Z0-9]$
+    Description: 'Name of the DynamoDB table to store the recognized text. Note: It
+      should be alphanumeric, underscore or hypen and between 3 and 63 characters.'
+    MaxLength: 63
+    MinLength: 3
+    Type: String
+Resources:
+  ImageBucket:
+    DeletionPolicy: Retain
+    Properties:
+      BucketName:
+        Ref: ImageBucketName
+      NotificationConfiguration:
+        LambdaConfigurations:
+        - Event: s3:ObjectCreated:*
+          Filter:
+            S3Key:
+              Rules:
+              - Name: suffix
+                Value: jpeg
+          Function:
+            Fn::Sub: ${ProcessorFunction.Arn}
+        - Event: s3:ObjectCreated:*
+          Filter:
+            S3Key:
+              Rules:
+              - Name: suffix
+                Value: png
+          Function:
+            Fn::Sub: ${ProcessorFunction.Arn}
+        - Event: s3:ObjectCreated:*
+          Filter:
+            S3Key:
+              Rules:
+              - Name: suffix
+                Value: tiff
+          Function:
+            Fn::Sub: ${ProcessorFunction.Arn}
+    Type: AWS::S3::Bucket
+  ProcessorFunction:
+    Properties:
+      CodeUri: s3://autosonic/0c54427ad5e18805487f445157bb71ff
+      Environment:
+        Variables:
+          DYNAMODB_TABLE:
+            Ref: TextTableName
+          TESSDATA_PREFIX: ''
+      Events:
+        PhotoUpload:
+          Properties:
+            Bucket:
+              Ref: ImageBucket
+            Events: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                - Name: suffix
+                  Value: jpg
+          Type: S3
+      Handler: lambda_function.lambda_handler
+      MemorySize: 1536
+      Policies:
+      - S3ReadPolicy:
+          BucketName:
+            Ref: ImageBucketName
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: TextTableName
+      Runtime: python3.6
+      Timeout: 300
+    Type: AWS::Serverless::Function
+  TextTable:
+    Properties:
+      AttributeDefinitions:
+      - AttributeName: ObjectPath
+        AttributeType: S
+      KeySchema:
+      - AttributeName: ObjectPath
+        KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      TableName:
+        Ref: TextTableName
+      Tags:
+      - Key: Reason
+        Value: LambdaOCR
+    Type: AWS::DynamoDB::Table
+Transform: AWS::Serverless-2016-10-31
